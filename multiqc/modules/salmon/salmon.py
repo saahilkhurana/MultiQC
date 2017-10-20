@@ -11,7 +11,7 @@ import os
 from multiqc import config
 from multiqc.plots import linegraph
 from multiqc.modules.base_module import BaseMultiqcModule
-
+from multiqc.modules.salmon.readers import GCModel
 # Initialise the logger
 log = logging.getLogger(__name__)
 
@@ -47,6 +47,37 @@ class MultiqcModule(BaseMultiqcModule):
                     self.add_data_source(f, s_name)
                     self.salmon_fld[s_name] = parsed
 
+        # Parse GC Bias
+        self.salmon_gcbias = dict()
+        for f in self.find_log_files('salmon/fld'):
+            if os.path.basename(f['root']) == 'libParams':
+                path = os.path.abspath(f['root'])
+                # log.debug(path)
+                path_mod = path[:-10]
+                # log.debug(path_mod)
+                if 'no_bias' in path_mod:
+                    continue
+                gcModel = GCModel()
+                gcModel.from_file(path_mod)
+
+                obs = gcModel.obs_
+                obs_weights = gcModel.obs_weights_
+                # log.debug(obs_weights)
+                exp = gcModel.exp_
+                exp_weights = gcModel.exp_weights_
+
+                obs_weighted = obs[0]*obs_weights[0] + obs[1]*obs_weights[1] + obs[2]*obs_weights[2]
+                exp_weighted = exp[0]*exp_weights[0] + exp[1]*exp_weights[1] + exp[2]*exp_weights[2]
+
+                ratio = OrderedDict()
+                for i in range(len(obs_weighted)):
+                    ratio[i] = float(obs_weighted[i]/exp_weighted[i])
+
+                s_name = os.path.abspath(f['root'])
+                # log.debug(s_name)
+                self.add_data_source(f, s_name)
+                self.salmon_gcbias[s_name] = ratio
+
         # Filter to strip out ignored sample names
         self.salmon_meta = self.ignore_samples(self.salmon_meta)
         self.salmon_fld = self.ignore_samples(self.salmon_fld)
@@ -59,6 +90,8 @@ class MultiqcModule(BaseMultiqcModule):
             self.write_data_file(self.salmon_meta, 'multiqc_salmon')
         if len(self.salmon_fld) > 0:
             log.info("Found {} fragment length distributions".format(len(self.salmon_fld)))
+        if len(self.salmon_gcbias) > 0:
+            log.info("Found {} GC Bias distributions".format(len(self.salmon_gcbias)))
 
         # Add alignment rate to the general stats table
         headers = OrderedDict()
@@ -92,3 +125,15 @@ class MultiqcModule(BaseMultiqcModule):
             'tt_label': '<b>{point.x:,.0f} bp</b>: {point.y:,.0f}',
         }
         self.add_section( plot = linegraph.plot(self.salmon_fld, pconfig) )
+
+        pconfig_gcbias = {
+            'smooth_points': 500,
+            'id': 'salmon_plot',
+            'title': 'Salmon: GC Bias',
+            'ylab': 'Fraction',
+            'xlab': 'Fragment Length (bp)',
+            'ymin': 0,
+            'xmin': 0,
+            'tt_label': '<b>{point.x:,.0f} bp</b>: {point.y:,.0f}',
+        }
+        self.add_section( plot = linegraph.plot(self.salmon_gcbias, pconfig_gcbias) )
