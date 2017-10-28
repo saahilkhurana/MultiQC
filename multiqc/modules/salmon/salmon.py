@@ -47,7 +47,7 @@ class MultiqcModule(BaseMultiqcModule):
                     self.add_data_source(f, s_name)
                     self.salmon_fld[s_name] = parsed
 
-        # Parse GC Bias
+        # Parse GC Bias Distribution logs
         self.salmon_gcbias = dict()
         for f in self.find_log_files('salmon/fld'):
             if os.path.basename(f['root']) == 'libParams':
@@ -129,9 +129,9 @@ class MultiqcModule(BaseMultiqcModule):
         pconfig_gcbias = {
             'smooth_points': 500,
             'id': 'salmon_plot',
-            'title': 'Salmon: GC Bias',
-            'ylab': 'Fraction',
-            'xlab': 'Fragment Length (bp)',
+            'title': 'Salmon: GC Bias Distribution',
+            'ylab': 'Ratio',
+            'xlab': 'Bins',
             'ymin': 0,
             'xmin': 0,
             'tt_label': '<b>{point.x:,.0f} bp</b>: {point.y:,.0f}',
