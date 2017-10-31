@@ -1,5 +1,145 @@
 import pandas as pd
 import numpy as np
+np.set_printoptions(precision=4)
+
+class SeqModel:
+    def __init__(self):
+        self.obs3_seqMat = None
+        self.obs5_seqMat = None
+        self.exp3_seqMat = None
+        self.exp5_seqMat = None
+        self.valid_ = False
+
+    def populate_model_(self, data_) :
+        """read 3 int
+            3 int arrays
+            long nrow, ncol
+            double matrix (nrow x ncol)
+            4
+                int rows, cols
+                double arrays
+
+        """
+        import struct
+        from numpy.linalg import norm
+
+        weights = None
+        model = None
+        offset = 0
+        int_struct = struct.Struct('@i')
+        long_struct = struct.Struct('@q')
+        double_struct = struct.Struct('@d')
+
+        x1 = int_struct.unpack_from(data_[offset:])[0]
+        offset += int_struct.size
+        x2 = int_struct.unpack_from(data_[offset:])[0]
+        offset += int_struct.size
+        x3 = int_struct.unpack_from(data_[offset:])[0]
+        offset += int_struct.size
+        # print(x1,x2,x3)
+        w1_struct = struct.Struct('@' + x1 * 'i')
+        w1 = w1_struct.unpack_from(data_[offset:])
+        offset += w1_struct.size
+        w2_struct = struct.Struct('@' + x1 * 'i')
+        w2 = w2_struct.unpack_from(data_[offset:])
+        offset += w2_struct.size
+        w3_struct = struct.Struct('@' + x1 * 'i')
+        w3 = w3_struct.unpack_from(data_[offset:])
+        offset += w3_struct.size
+        # print(w1,w2,w3)
+        r1 = long_struct.unpack_from(data_[offset:])[0]
+        offset += long_struct.size
+        c1 = long_struct.unpack_from(data_[offset:])[0]
+        offset += long_struct.size
+        # print(r1,c1)
+        model_struct = struct.Struct('@' + r1 * c1 * 'd')
+        model = model_struct.unpack_from(data_[offset:])
+        offset += model_struct.size
+        model = np.array(model)
+        # print(model)
+        row = int_struct.unpack_from(data_[offset:])[0]
+        offset += int_struct.size
+        col = int_struct.unpack_from(data_[offset:])[0]
+        offset += int_struct.size
+        # print(row, col)
+        val = int_struct.unpack_from(data_[offset:])[0]
+        offset += int_struct.size
+        val1 = int_struct.unpack_from(data_[offset:])[0]
+        offset += int_struct.size
+        # print(val, val1)
+        vals = struct.Struct('@' + 9 * 'd')
+        m1 = vals.unpack_from(data_[offset:])
+        offset += vals.size
+        vals = struct.Struct('@' + 9 * 'd')
+        m2 = vals.unpack_from(data_[offset:])
+        offset += vals.size
+        vals = struct.Struct('@' + 9 * 'd')
+        m3 = vals.unpack_from(data_[offset:])
+        offset += vals.size
+        vals = struct.Struct('@' + 9 * 'd')
+        m4 = vals.unpack_from(data_[offset:])
+        offset += vals.size
+        # print(m1,m2,m3,m4)
+        ret = []
+        ret.append(np.array(m1))
+        ret.append(np.array(m2))
+        ret.append(np.array(m3))
+        ret.append(np.array(m4))
+
+        return ret
+
+    def from_file(self, dname):
+        import os
+        import gzip
+        obs3_name = os.path.sep.join([dname, 'aux_info', 'obs3_seq.gz'])
+        obs5_name = os.path.sep.join([dname, 'aux_info', 'obs5_seq.gz'])
+        exp3_name = os.path.sep.join([dname, 'aux_info', 'exp3_seq.gz'])
+        exp5_name = os.path.sep.join([dname, 'aux_info', 'exp5_seq.gz'])
+
+        obs3_dat = None
+        obs5_dat = None
+        exp3_dat = None
+        exp5_dat = None
+        try:
+            with gzip.open(obs3_name) as obs3_file:
+                obs3_dat = obs3_file.read()
+            self.obs3_seqMat = self.populate_model_(obs3_dat)
+        except IOError:
+            print("Could not open file {}".format(obs3_name))
+            return False
+
+        try:
+            with gzip.open(obs5_name) as obs5_file:
+                obs5_dat = obs5_file.read()
+            self.obs5_seqMat = self.populate_model_(obs5_dat)
+        except IOError:
+            print("Could not open file {}".format(obs5_name))
+            return False
+
+        try:
+            with gzip.open(exp3_name) as exp3_file:
+                exp3_dat = exp3_file.read()
+            self.exp3_seqMat = self.populate_model_(exp3_dat)
+        except IOError:
+            print("Could not open file {}".format(exp3_name))
+            return False
+
+        try:
+            with gzip.open(exp5_name) as exp5_file:
+                exp5_dat = exp5_file.read()
+            self.exp5_seqMat = self.populate_model_(exp5_dat)
+        except IOError:
+            print("Could not open file {}".format(exp5_name))
+            return False
+
+        # print(self.obs3_seqMat)
+        # print(self.obs5_seqMat)
+        # print(self.exp3_seqMat)
+        # print(self.exp5_seqMat)
+
+        self.valid_ = True
+        return True
+
 
 class GCModel:
     def __init__(self):
@@ -28,6 +168,7 @@ class GCModel:
 
         ncol = long_struct.unpack_from(data_[offset:])[0]
         offset += long_struct.size
+        # print(nrow,ncol)
 
         weight_struct = struct.Struct('@' + nrow * 'd')
         weights = weight_struct.unpack_from(data_[offset:])
@@ -65,6 +206,12 @@ class GCModel:
 
         self.valid_ = True
         return True
+
+if __name__ == '__main__':
+    s = SeqModel()
+    s.from_file('/Users/alok/Downloads/project4/project4/ERR188041/bias/')
+    # g = GCModel()
+    # g.from_file('/Users/alok/Downloads/project4/project4/ERR188041/bias/')
 
 def readThreeColumnTruth(fn, suffix=""):
     df = pd.read_csv(fn, sep=' ', skiprows=1,
@@ -177,22 +324,22 @@ def readSalmonBoot(fn, suffix=""):
     bootstrapFile = os.path.sep.join([fn, auxDir, "bootstrap", "bootstraps.gz"])
     nameFile = os.path.sep.join([fn, auxDir, "bootstrap", "names.tsv.gz"])
     if not os.path.isfile(bootstrapFile):
-       print("The required bootstrap file {} doesn't appear to exist".format(bootstrapFile)) 
+       print("The required bootstrap file {} doesn't appear to exist".format(bootstrapFile))
        sys.exit(1)
     if not os.path.isfile(nameFile):
-       print("The required transcript name file {} doesn't appear to exist".format(nameFile)) 
+       print("The required transcript name file {} doesn't appear to exist".format(nameFile))
        sys.exit(1)
 
     txpNames = None
     with gzip.open(nameFile) as nf:
         txpNames = nf.read().strip().split('\t')
-    
+
     ntxp = len(txpNames)
     print("Expecting bootstrap info for {} transcripts".format(ntxp))
-    
+
     with open(os.path.sep.join([fn, auxDir, "meta_info.json"])) as fh:
         meta_info = json.load(fh)
-        
+
     stype = None
     if meta_info['samp_type'] == 'gibbs':
         s = struct.Struct('@' + 'd' * ntxp)
@@ -203,7 +350,7 @@ def readSalmonBoot(fn, suffix=""):
     else:
         print("Unknown sampling method: {}".format(meta_info['samp_type']))
         sys.exit(1)
-        
+
     numBoot = 0
     samps = []
     convert = float

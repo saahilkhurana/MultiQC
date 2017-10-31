@@ -11,7 +11,7 @@ import os
 from multiqc import config
 from multiqc.plots import linegraph
 from multiqc.modules.base_module import BaseMultiqcModule
-from multiqc.modules.salmon.readers import GCModel
+from multiqc.modules.salmon.readers import GCModel, SeqModel
 # Initialise the logger
 log = logging.getLogger(__name__)
 
@@ -78,6 +78,39 @@ class MultiqcModule(BaseMultiqcModule):
                 self.add_data_source(f, s_name)
                 self.salmon_gcbias[s_name] = ratio
 
+        # Parse Sequence bias Distribution logs
+        self.salmon_seq_bias_3 = dict()
+        self.salmon_seq_bias_5 = dict()
+        for f in self.find_log_files('salmon/fld'):
+            if os.path.basename(f['root']) == 'libParams':
+                path = os.path.abspath(f['root'])
+                # log.debug(path)
+                path_mod = path[:-10]
+                # log.debug(path_mod)
+                if 'no_bias' in path_mod:
+                    continue
+                seqModel = SeqModel()
+                seqModel.from_file(path_mod)
+
+                obs3 = seqModel.obs3_seqMat[0]
+                log.debug(obs3)
+                obs5 = seqModel.obs5_seqMat[0]
+                exp3 = seqModel.exp3_seqMat[0]
+                exp5 = seqModel.exp5_seqMat[0]
+
+                ratio3 = OrderedDict()
+                for i in range(len(obs3)):
+                    ratio3[i] = float(obs3[i]/exp3[i])
+                ratio5 = OrderedDict()
+                for i in range(len(obs5)):
+                    ratio5[i] = float(obs5[i]/exp5[i])
+
+                s_name = os.path.abspath(f['root'])
+                # log.debug(s_name)
+                self.add_data_source(f, s_name)
+                self.salmon_seq_bias_3[s_name] = ratio3
+                self.salmon_seq_bias_5[s_name] = ratio5
+
         # Filter to strip out ignored sample names
         self.salmon_meta = self.ignore_samples(self.salmon_meta)
         self.salmon_fld = self.ignore_samples(self.salmon_fld)
@@ -92,6 +125,10 @@ class MultiqcModule(BaseMultiqcModule):
             log.info("Found {} fragment length distributions".format(len(self.salmon_fld)))
         if len(self.salmon_gcbias) > 0:
             log.info("Found {} GC Bias distributions".format(len(self.salmon_gcbias)))
+        if len(self.salmon_seq_bias_3) > 0:
+            log.info("Found {} Sequence 3' Bias distributions".format(len(self.salmon_seq_bias_3)))
+        if len(self.salmon_seq_bias_5) > 0:
+            log.info("Found {} Sequence 5' Bias distributions".format(len(self.salmon_seq_bias_5)))
 
         # Add alignment rate to the general stats table
         headers = OrderedDict()
@@ -130,10 +167,34 @@ class MultiqcModule(BaseMultiqcModule):
             'smooth_points': 500,
             'id': 'salmon_plot',
             'title': 'Salmon: GC Bias Distribution',
-            'ylab': 'Ratio',
+            'ylab': 'Ratio of Observed to Expected',
             'xlab': 'Bins',
             'ymin': 0,
             'xmin': 0,
             'tt_label': '<b>{point.x:,.0f} bp</b>: {point.y:,.0f}',
         }
         self.add_section( plot = linegraph.plot(self.salmon_gcbias, pconfig_gcbias) )
+
+        pconfig_seq_bias_3 = {
+            'smooth_points': 500,
+            'id': 'salmon_plot',
+            'title': "Salmon: Sequence 3' Bias Distribution",
+            'ylab': 'Ratio of Observed to Expected',
+            'xlab': 'Context Length',
+            'ymin': 0,
+            'xmin': 0,
+            'tt_label': '<b>{point.x:,.0f} bp</b>: {point.y:,.0f}',
+        }
+        self.add_section( plot = linegraph.plot(self.salmon_seq_bias_3, pconfig_seq_bias_3) )
+
+        pconfig_seq_bias_5 = {
+            'smooth_points': 500,
+            'id': 'salmon_plot',
+            'title': "Salmon: Sequence 5' Bias Distribution",
+            'ylab': 'Ratio of Observed to Expected',
+            'xlab': 'Context Length',
+            'ymin': 0,
+            'xmin': 0,
+            'tt_label': '<b>{point.x:,.0f} bp</b>: {point.y:,.0f}',
+        }
+        self.add_section( plot = linegraph.plot(self.salmon_seq_bias_5, pconfig_seq_bias_5) )
