@@ -10,13 +10,12 @@ class SeqModel:
         self.valid_ = False
 
     def populate_model_(self, data_) :
-        """read 3 int
+        """ read 3 ints
             3 int arrays
             long nrow, ncol
             double matrix (nrow x ncol)
-            4
-                int rows, cols
-                double arrays
+            int rows, cols
+            double arrays of size 4*context_len
 
         """
         import struct
@@ -29,61 +28,61 @@ class SeqModel:
         long_struct = struct.Struct('@q')
         double_struct = struct.Struct('@d')
 
-        x1 = int_struct.unpack_from(data_[offset:])[0]
+        context_len = int_struct.unpack_from(data_[offset:])[0]
         offset += int_struct.size
-        x2 = int_struct.unpack_from(data_[offset:])[0]
+        l_context_len = int_struct.unpack_from(data_[offset:])[0]
         offset += int_struct.size
-        x3 = int_struct.unpack_from(data_[offset:])[0]
+        r_context_len = int_struct.unpack_from(data_[offset:])[0]
         offset += int_struct.size
-        # print(x1,x2,x3)
-        w1_struct = struct.Struct('@' + x1 * 'i')
-        w1 = w1_struct.unpack_from(data_[offset:])
-        offset += w1_struct.size
-        w2_struct = struct.Struct('@' + x1 * 'i')
-        w2 = w2_struct.unpack_from(data_[offset:])
-        offset += w2_struct.size
-        w3_struct = struct.Struct('@' + x1 * 'i')
-        w3 = w3_struct.unpack_from(data_[offset:])
-        offset += w3_struct.size
-        # print(w1,w2,w3)
-        r1 = long_struct.unpack_from(data_[offset:])[0]
+        # print(context_len,l_context_len,r_context_len)
+        vlmm_struct = struct.Struct('@' + context_len * 'i')
+        vlmm = vlmm_struct.unpack_from(data_[offset:])
+        offset += vlmm_struct.size
+        shifts_struct = struct.Struct('@' + context_len * 'i')
+        shifts = shifts_struct.unpack_from(data_[offset:])
+        offset += shifts_struct.size
+        widths_struct = struct.Struct('@' + context_len * 'i')
+        widths = widths_struct.unpack_from(data_[offset:])
+        offset += widths_struct.size
+
+        nrow = long_struct.unpack_from(data_[offset:])[0]
         offset += long_struct.size
-        c1 = long_struct.unpack_from(data_[offset:])[0]
+        ncol = long_struct.unpack_from(data_[offset:])[0]
         offset += long_struct.size
-        # print(r1,c1)
-        model_struct = struct.Struct('@' + r1 * c1 * 'd')
+
+        model_struct = struct.Struct('@' + nrow * ncol * 'd')
         model = model_struct.unpack_from(data_[offset:])
         offset += model_struct.size
         model = np.array(model)
-        # print(model)
+
         row = int_struct.unpack_from(data_[offset:])[0]
         offset += int_struct.size
         col = int_struct.unpack_from(data_[offset:])[0]
         offset += int_struct.size
-        # print(row, col)
+
         val = int_struct.unpack_from(data_[offset:])[0]
         offset += int_struct.size
         val1 = int_struct.unpack_from(data_[offset:])[0]
         offset += int_struct.size
-        # print(val, val1)
+
         vals = struct.Struct('@' + 9 * 'd')
-        m1 = vals.unpack_from(data_[offset:])
+        marginal_prob1 = vals.unpack_from(data_[offset:])
         offset += vals.size
         vals = struct.Struct('@' + 9 * 'd')
-        m2 = vals.unpack_from(data_[offset:])
+        marginal_prob2 = vals.unpack_from(data_[offset:])
         offset += vals.size
         vals = struct.Struct('@' + 9 * 'd')
-        m3 = vals.unpack_from(data_[offset:])
+        marginal_prob3 = vals.unpack_from(data_[offset:])
         offset += vals.size
         vals = struct.Struct('@' + 9 * 'd')
-        m4 = vals.unpack_from(data_[offset:])
+        marginal_prob4 = vals.unpack_from(data_[offset:])
         offset += vals.size
-        # print(m1,m2,m3,m4)
+
         ret = []
-        ret.append(np.array(m1))
-        ret.append(np.array(m2))
-        ret.append(np.array(m3))
-        ret.append(np.array(m4))
+        ret.append(np.array(marginal_prob1))
+        ret.append(np.array(marginal_prob2))
+        ret.append(np.array(marginal_prob3))
+        ret.append(np.array(marginal_prob4))
 
         return ret
 
@@ -130,11 +129,6 @@ class SeqModel:
         except IOError:
             print("Could not open file {}".format(exp5_name))
             return False
-
-        # print(self.obs3_seqMat)
-        # print(self.obs5_seqMat)
-        # print(self.exp3_seqMat)
-        # print(self.exp5_seqMat)
 
         self.valid_ = True
         return True
@@ -205,12 +199,6 @@ class GCModel:
 
         self.valid_ = True
         return True
-
-if __name__ == '__main__':
-    s = SeqModel()
-    s.from_file('/Users/alok/Downloads/project4/project4/ERR188041/bias/')
-    # g = GCModel()
-    # g.from_file('/Users/alok/Downloads/project4/project4/ERR188041/bias/')
 
 def readThreeColumnTruth(fn, suffix=""):
     df = pd.read_csv(fn, sep=' ', skiprows=1,
