@@ -27,9 +27,12 @@ class MultiqcModule(BaseMultiqcModule):
             href='http://combine-lab.github.io/salmon/',
             info="is a tool for quantifying the expression of transcripts using RNA-seq data.")
 
+        self.nucleotides = ['A', 'C', 'G', 'T']
         self.salmon_meta = dict()
         self.salmon_gcbias = dict()
-        self.matrix = []
+        self.matrix_gc = []
+        self.matrix_seq3 = [[] for i in range(len(self.nucleotides))]
+        self.matrix_seq5 = [[] for i in range(len(self.nucleotides))]
 
         self.general_stats()
         if len(self.salmon_meta) > 0:
@@ -145,7 +148,7 @@ class MultiqcModule(BaseMultiqcModule):
                 ratio = OrderedDict()
                 for i in range(len(obs_weighted)):
                     ratio[i*4] = float(obs_weighted[i]/exp_weighted[i])
-                self.matrix.append(list(ratio.values()))
+                self.matrix_gc.append(list(ratio.values()))
 
                 s_name = os.path.abspath(f['root'])
 
@@ -160,14 +163,12 @@ class MultiqcModule(BaseMultiqcModule):
             'xlab': 'Bins',
             'ymin': 0,
             'xmin': 0,
-            'tt_label': '<b>{point.x:,.0f} bp</b>: {point.y:,.0f}',
+            'tt_label': '<b>{point.x:,.0f} </b>: {point.y:,.0f}',
         }
         self.add_section(plot = linegraph.plot(self.salmon_gcbias, pconfig_gcbias))
 
     def seq_bias(self):
         # Parse Sequence bias Distribution logs
-
-        nucleotides = ['A', 'C', 'G', 'T']
 
         self.salmon_seq_bias_3 = [dict() for i in range(4)]
         self.salmon_seq_bias_5 = [dict() for i in range(4)]
@@ -193,7 +194,7 @@ class MultiqcModule(BaseMultiqcModule):
 
                 s_name = os.path.abspath(f['root'])
 
-                for i in range(len(nucleotides)) :
+                for i in range(len(self.nucleotides)) :
 
                     for j in range(len(obs3[i])):
                         ratio3[i][j] = float(obs3[i][j]*1.0)/(exp3[i][j]*1.0)
@@ -201,33 +202,35 @@ class MultiqcModule(BaseMultiqcModule):
                         ratio5[i][j] = (obs5[i][j]*1.0)/(exp5[i][j]*1.0)
 
                     self.salmon_seq_bias_3[i][self.get_sample_name(s_name)] = ratio3[i]
+                    self.matrix_seq3[i].append(list(ratio3[i].values()))
                     self.salmon_seq_bias_5[i][self.get_sample_name(s_name)] = ratio5[i]
+                    self.matrix_seq5[i].append(list(ratio5[i].values()))
 
                 self.add_data_source(f, s_name)
 
-        for i in range(len(nucleotides)) :
+        for i in range(len(self.nucleotides)) :
             pconfig_seq_bias_3 = {
                 'smooth_points': 500,
                 'id': 'salmon_plot',
-                'title': "Salmon: Sequence 3' Bias Distribution " + nucleotides[i],
+                'title': "Salmon: Sequence 3' Bias Distribution " + self.nucleotides[i],
                 'ylab': 'Ratio of Observed to Expected',
                 'xlab': 'Context Length',
                 'ymin': 0,
                 'xmin': 0,
-                'tt_label': '<b>{point.x:,.0f} bp</b>: {point.y:,.0f}',
+                'tt_label': '<b>{point.x:,.0f} </b>: {point.y:,.0f}',
             }
             self.add_section( plot = linegraph.plot(self.salmon_seq_bias_3[i], pconfig_seq_bias_3) )
 
-        for i in range(len(nucleotides)) :
+        for i in range(len(self.nucleotides)) :
             pconfig_seq_bias_5 = {
                 'smooth_points': 500,
                 'id': 'salmon_plot',
-                'title': "Salmon: Sequence 5' Bias Distribution " + nucleotides[i],
+                'title': "Salmon: Sequence 5' Bias Distribution " + self.nucleotides[i],
                 'ylab': 'Ratio of Observed to Expected',
                 'xlab': 'Context Length',
                 'ymin': 0,
                 'xmin': 0,
-                'tt_label': '<b>{point.x:,.0f} bp</b>: {point.y:,.0f}',
+                'tt_label': '<b>{point.x:,.0f} </b>: {point.y:,.0f}',
             }
             self.add_section( plot = linegraph.plot(self.salmon_seq_bias_5[i], pconfig_seq_bias_5) )
 
@@ -239,10 +242,15 @@ class MultiqcModule(BaseMultiqcModule):
                 s_name = os.path.abspath(f['root'])
                 names.append(self.get_sample_name(s_name))
 
-        sims = [[0 for j in range(len(self.matrix))] for i in range(len(self.matrix))]
-        for i in range(len(self.matrix)) :
-            for j in range(len(self.matrix)) :
-                sims[i][j] = self.jensen_shannon_divergence(self.matrix[i], self.matrix[j])
+        number_samples = len(self.matrix_gc)
+        sims = [[0 for j in range(number_samples)] for i in range(number_samples)]
+        for i in range(number_samples) :
+            for j in range(number_samples) :
+                sims[i][j] = self.jensen_shannon_divergence(self.matrix_gc[i], self.matrix_gc[j])
+                for k in range(len(self.nucleotides)):
+                    sims[i][j] += self.jensen_shannon_divergence(self.matrix_seq3[k][i], self.matrix_seq3[k][j])
+                    sims[i][j] += self.jensen_shannon_divergence(self.matrix_seq5[k][i], self.matrix_seq5[k][j])
+                sims[i][j] /= 9.0
 
         pconfig_sim = {
             'title': 'Jensen Shannon Divergence similarity',
