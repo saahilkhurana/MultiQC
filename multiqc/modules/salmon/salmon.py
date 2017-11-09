@@ -7,6 +7,7 @@ from collections import OrderedDict
 import json
 import logging
 import os
+import numpy as np
 from math import sqrt, log
 from numpy import zeros, array
 from multiqc import config
@@ -30,9 +31,9 @@ class MultiqcModule(BaseMultiqcModule):
         self.nucleotides = ['A', 'C', 'G', 'T']
         self.salmon_meta = dict()
         self.salmon_gcbias = dict()
-        self.matrix_gc = []
-        self.matrix_seq3 = [[] for i in range(len(self.nucleotides))]
-        self.matrix_seq5 = [[] for i in range(len(self.nucleotides))]
+        self.matrix_gc = {}
+        self.matrix_seq3 = [{} for i in range(len(self.nucleotides))]
+        self.matrix_seq5 = [{} for i in range(len(self.nucleotides))]
 
         self.general_stats()
         if len(self.salmon_meta) > 0:
@@ -118,7 +119,7 @@ class MultiqcModule(BaseMultiqcModule):
             'xlab': 'Fragment Length (bp)',
             'ymin': 0,
             'xmin': 0,
-            'tt_label': '<b>{point.x:,.0f} bp</b>: {point.y:,.0f}',
+            'tt_label': '<b>{point.x:,.0f} bp</b>: {point.y:,.3f}',
         }
         self.add_section(plot = linegraph.plot(self.salmon_fld, pconfig))
 
@@ -128,11 +129,17 @@ class MultiqcModule(BaseMultiqcModule):
         for f in self.find_log_files('salmon/fld'):
             if os.path.basename(f['root']) == 'libParams':
                 path = os.path.abspath(f['root'])
-                # log.debug(path)
                 path_mod = path[:-10]
-                # log.debug(path_mod)
+
                 if 'no_bias' in path_mod:
                     continue
+
+                path_meta_info = os.path.join(path_mod, 'aux_info', 'meta_info.json')
+                with open(path_meta_info, 'r') as info:
+                    meta_info = json.load(info)
+                    if not meta_info['gc_bias_correct']:
+                        continue
+
                 gcModel = GCModel()
                 gcModel.from_file(path_mod)
 
@@ -145,12 +152,15 @@ class MultiqcModule(BaseMultiqcModule):
                 obs_weighted = obs[0]*obs_weights[0] + obs[1]*obs_weights[1] + obs[2]*obs_weights[2]
                 exp_weighted = exp[0]*exp_weights[0] + exp[1]*exp_weights[1] + exp[2]*exp_weights[2]
 
+                scale_bin_factor = 100.0/(len(obs[0])*1.0)
+
                 ratio = OrderedDict()
                 for i in range(len(obs_weighted)):
-                    ratio[i*4] = float(obs_weighted[i]/exp_weighted[i])
-                self.matrix_gc.append(list(ratio.values()))
+                    ratio[i*scale_bin_factor] = float(obs_weighted[i]/exp_weighted[i])
 
                 s_name = os.path.abspath(f['root'])
+                # self.matrix_gc.append(list(ratio.values()))
+                self.matrix_gc[self.get_sample_name(s_name)] = list(ratio.values())
 
                 self.add_data_source(f, s_name)
                 self.salmon_gcbias[self.get_sample_name(s_name)] = ratio
@@ -163,7 +173,7 @@ class MultiqcModule(BaseMultiqcModule):
             'xlab': 'Bins',
             'ymin': 0,
             'xmin': 0,
-            'tt_label': '<b>{point.x:,.0f} </b>: {point.y:,.0f}',
+            'tt_label': '<b>{point.x:,.0f} </b>: {point.y:,.3f}',
         }
         self.add_section(plot = linegraph.plot(self.salmon_gcbias, pconfig_gcbias))
 
@@ -175,11 +185,16 @@ class MultiqcModule(BaseMultiqcModule):
         for f in self.find_log_files('salmon/fld'):
             if os.path.basename(f['root']) == 'libParams':
                 path = os.path.abspath(f['root'])
-
                 path_mod = path[:-10]
 
                 if 'no_bias' in path_mod:
                     continue
+
+                path_meta_info = os.path.join(path_mod, 'aux_info', 'meta_info.json')
+                with open(path_meta_info, 'r') as info:
+                    meta_info = json.load(info)
+                    if not meta_info['seq_bias_correct']:
+                        continue
 
                 seqModel = SeqModel()
                 seqModel.from_file(path_mod)
@@ -202,9 +217,9 @@ class MultiqcModule(BaseMultiqcModule):
                         ratio5[i][j] = (obs5[i][j]*1.0)/(exp5[i][j]*1.0)
 
                     self.salmon_seq_bias_3[i][self.get_sample_name(s_name)] = ratio3[i]
-                    self.matrix_seq3[i].append(list(ratio3[i].values()))
+                    self.matrix_seq3[i][self.get_sample_name(s_name)] = (list(ratio3[i].values()))
                     self.salmon_seq_bias_5[i][self.get_sample_name(s_name)] = ratio5[i]
-                    self.matrix_seq5[i].append(list(ratio5[i].values()))
+                    self.matrix_seq5[i][self.get_sample_name(s_name)] = (list(ratio5[i].values()))
 
                 self.add_data_source(f, s_name)
 
@@ -217,7 +232,7 @@ class MultiqcModule(BaseMultiqcModule):
                 'xlab': 'Context Length',
                 'ymin': 0,
                 'xmin': 0,
-                'tt_label': '<b>{point.x:,.0f} </b>: {point.y:,.0f}',
+                'tt_label': '<b>{point.x:,.0f} </b>: {point.y:,.3f}',
             }
             self.add_section( plot = linegraph.plot(self.salmon_seq_bias_3[i], pconfig_seq_bias_3) )
 
@@ -230,27 +245,52 @@ class MultiqcModule(BaseMultiqcModule):
                 'xlab': 'Context Length',
                 'ymin': 0,
                 'xmin': 0,
-                'tt_label': '<b>{point.x:,.0f} </b>: {point.y:,.0f}',
+                'tt_label': '<b>{point.x:,.0f} </b>: {point.y:,.3f}',
             }
             self.add_section( plot = linegraph.plot(self.salmon_seq_bias_5[i], pconfig_seq_bias_5) )
 
     def heatmap(self):
 
         names = []
+        gc_exists = {}
+        seq_exists = {}
         for f in self.find_log_files('salmon/fld'):
             if os.path.basename(f['root']) == 'libParams':
                 s_name = os.path.abspath(f['root'])
+                path = s_name[:-10]
+
+                if 'no_bias' in s_name:
+                    continue
+                path_meta_info = os.path.join(path, 'aux_info', 'meta_info.json')
+                with open(path_meta_info, 'r') as info:
+                    meta_info = json.load(info)
+
+                    if not meta_info['gc_bias_correct'] and not meta_info['seq_bias_correct']:
+                        continue
+
+                    gc_exists[self.get_sample_name(s_name)] = meta_info['gc_bias_correct']
+                    seq_exists[self.get_sample_name(s_name)] = meta_info['seq_bias_correct']
+
                 names.append(self.get_sample_name(s_name))
 
-        number_samples = len(self.matrix_gc)
-        sims = [[0 for j in range(number_samples)] for i in range(number_samples)]
-        for i in range(number_samples) :
-            for j in range(number_samples) :
-                sims[i][j] = self.jensen_shannon_divergence(self.matrix_gc[i], self.matrix_gc[j])
+        # number_samples = len(self.matrix_gc)
+        sims = [[0 for j in range(len(names))] for i in range(len(names))]
+        for i in range(len(names)) :
+            for j in range(len(names)) :
+                feature_count = 0
+                if gc_exists[names[i]] and gc_exists[names[j]]:
+                    sims[i][j] += self.jensen_shannon_divergence(self.matrix_gc[names[i]], self.matrix_gc[names[j]])
+                    feature_count += 1.0
                 for k in range(len(self.nucleotides)):
-                    sims[i][j] += self.jensen_shannon_divergence(self.matrix_seq3[k][i], self.matrix_seq3[k][j])
-                    sims[i][j] += self.jensen_shannon_divergence(self.matrix_seq5[k][i], self.matrix_seq5[k][j])
-                sims[i][j] /= 9.0
+                    if seq_exists[names[i]] and seq_exists[names[j]]:
+                        sims[i][j] += self.jensen_shannon_divergence(self.matrix_seq3[k][names[i]], self.matrix_seq3[k][names[j]])
+                        sims[i][j] += self.jensen_shannon_divergence(self.matrix_seq5[k][names[i]], self.matrix_seq5[k][names[j]])
+                        feature_count += 2.0
+                        
+                if feature_count == 0.0:
+                    sims[i][j] = 1.0
+                else:
+                    sims[i][j] /= feature_count
 
         pconfig_sim = {
             'title': 'Jensen Shannon Divergence similarity',
@@ -260,16 +300,18 @@ class MultiqcModule(BaseMultiqcModule):
 
         self.add_section(plot = heatmap.plot(sims, names, pconfig=pconfig_sim))
 
-    def kl_divergence(self, p, q) :
-        """ Compute KL divergence of two vectors, K(p || q)."""
-        return sum(p[x] * log((p[x]) / (q[x] if q[x] != 0 else 1)) for x in range(len(p)) if p[x] != 0.0 or p[x] != 0)
+    def jensen_shannon_divergence(self, P, Q):
+        """Compute the Jensen-Shannon divergence between two probability distributions.
 
-    def jensen_shannon_divergence(self, p, q):
-        """ Returns the Jensen-Shannon divergence. """
-        self.JSD = 0.0
-        weight = 0.5
-        average = zeros(len(p)) #Average
-        for x in range(len(p)):
-            average[x] = weight * p[x] + (1 - weight) * q[x]
-            self.JSD = (weight * self.kl_divergence(array(p), average)) + ((1 - weight) * self.kl_divergence(array(q), average))
-        return 1-(self.JSD/sqrt(2 * log(2)))
+            P, Q : array-like
+            Probability distributions of equal length that sum to 1
+        """
+        def _kldiv(A, B):
+            return np.sum([v for v in A * np.log2(A/B) if not np.isnan(v)])
+
+        P = np.array(P)
+        Q = np.array(Q)
+
+        M = 0.5 * (P + Q)
+
+        return 0.5 * (_kldiv(P, M) +_kldiv(Q, M))
