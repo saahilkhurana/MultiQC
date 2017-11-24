@@ -11,7 +11,7 @@ import numpy as np
 from math import sqrt, log
 from numpy import zeros, array
 from multiqc import config
-from multiqc.plots import linegraph, heatmap
+from multiqc.plots import linegraph, heatmap, table
 from multiqc.modules.base_module import BaseMultiqcModule
 from multiqc.modules.salmon.readers import GCModel, SeqModel
 # Initialise the logger
@@ -31,6 +31,8 @@ class MultiqcModule(BaseMultiqcModule):
         self.nucleotides = ['A', 'C', 'G', 'T']
         self.salmon_meta = dict()
         self.salmon_gcbias = dict()
+        self.salmon_seq_bias_3 = [dict() for i in range(4)]
+        self.salmon_seq_bias_5 = [dict() for i in range(4)]
         self.matrix_gc = {}
         self.matrix_seq3 = [{} for i in range(len(self.nucleotides))]
         self.matrix_seq5 = [{} for i in range(len(self.nucleotides))]
@@ -68,6 +70,11 @@ class MultiqcModule(BaseMultiqcModule):
 
     def general_stats(self):
         # Add alignment rate to the general stats table
+        for f in self.find_log_files('salmon/meta'):
+            # Get the s_name from the parent directory
+            s_name = os.path.basename( os.path.dirname(f['root']) )
+            s_name = self.clean_s_name(s_name, f['root'])
+            self.salmon_meta[s_name] = json.loads(f['f'])
         headers = OrderedDict()
         headers['percent_mapped'] = {
             'title': '% Aligned',
@@ -88,12 +95,6 @@ class MultiqcModule(BaseMultiqcModule):
         self.general_stats_addcols(self.salmon_meta, headers)
 
     def fld(self):
-
-        for f in self.find_log_files('salmon/meta'):
-            # Get the s_name from the parent directory
-            s_name = os.path.basename( os.path.dirname(f['root']) )
-            s_name = self.clean_s_name(s_name, f['root'])
-            self.salmon_meta[s_name] = json.loads(f['f'])
         # Parse Fragment Length Distribution logs
         self.salmon_fld = dict()
         for f in self.find_log_files('salmon/fld'):
@@ -175,13 +176,12 @@ class MultiqcModule(BaseMultiqcModule):
             'xmin': 0,
             'tt_label': '<b>{point.x:,.0f} </b>: {point.y:,.3f}',
         }
-        self.add_section(plot = linegraph.plot(self.salmon_gcbias, pconfig_gcbias))
+        if len(self.salmon_gcbias) > 0:
+            self.add_section(plot = linegraph.plot(self.salmon_gcbias, pconfig_gcbias))
 
     def seq_bias(self):
         # Parse Sequence bias Distribution logs
 
-        self.salmon_seq_bias_3 = [dict() for i in range(4)]
-        self.salmon_seq_bias_5 = [dict() for i in range(4)]
         for f in self.find_log_files('salmon/fld'):
             if os.path.basename(f['root']) == 'libParams':
                 path = os.path.abspath(f['root'])
@@ -205,21 +205,23 @@ class MultiqcModule(BaseMultiqcModule):
                 exp5 = seqModel.exp5_seqMat
 
                 ratio3 = [OrderedDict() for i in range(4)]
+                # ratio33 = [OrderedDict() for i in range(4)]
                 ratio5 = [OrderedDict() for i in range(4)]
 
                 s_name = os.path.abspath(f['root'])
+                sample_name = self.get_sample_name(s_name)
 
                 for i in range(len(self.nucleotides)) :
 
                     for j in range(len(obs3[i])):
-                        ratio3[i][j] = float(obs3[i][j]*1.0)/(exp3[i][j]*1.0)
+                        ratio3[i][j-4] = float(obs3[i][j]*1.0)/(exp3[i][j]*1.0)
                     for j in range(len(obs5[i])):
-                        ratio5[i][j] = (obs5[i][j]*1.0)/(exp5[i][j]*1.0)
+                        ratio5[i][j-4] = (obs5[i][j]*1.0)/(exp5[i][j]*1.0)
 
-                    self.salmon_seq_bias_3[i][self.get_sample_name(s_name)] = ratio3[i]
-                    self.matrix_seq3[i][self.get_sample_name(s_name)] = (list(ratio3[i].values()))
-                    self.salmon_seq_bias_5[i][self.get_sample_name(s_name)] = ratio5[i]
-                    self.matrix_seq5[i][self.get_sample_name(s_name)] = (list(ratio5[i].values()))
+                    self.salmon_seq_bias_3[i][sample_name] = ratio3[i]
+                    self.matrix_seq3[i][sample_name] = (list(ratio3[i].values()))
+                    self.salmon_seq_bias_5[i][sample_name] = ratio5[i]
+                    self.matrix_seq5[i][sample_name] = (list(ratio5[i].values()))
 
                 self.add_data_source(f, s_name)
 
@@ -231,10 +233,11 @@ class MultiqcModule(BaseMultiqcModule):
                 'ylab': 'Ratio of Observed to Expected',
                 'xlab': 'Context Length',
                 'ymin': 0,
-                'xmin': 0,
+                'xmin': -4,
                 'tt_label': '<b>{point.x:,.0f} </b>: {point.y:,.3f}',
             }
-            self.add_section( plot = linegraph.plot(self.salmon_seq_bias_3[i], pconfig_seq_bias_3) )
+            if len(self.salmon_seq_bias_3) > 0:
+                self.add_section( plot = linegraph.plot(self.salmon_seq_bias_3[i], pconfig_seq_bias_3) )
 
         for i in range(len(self.nucleotides)) :
             pconfig_seq_bias_5 = {
@@ -244,20 +247,23 @@ class MultiqcModule(BaseMultiqcModule):
                 'ylab': 'Ratio of Observed to Expected',
                 'xlab': 'Context Length',
                 'ymin': 0,
-                'xmin': 0,
+                'xmin': -4,
                 'tt_label': '<b>{point.x:,.0f} </b>: {point.y:,.3f}',
             }
-            self.add_section( plot = linegraph.plot(self.salmon_seq_bias_5[i], pconfig_seq_bias_5) )
+            if len(self.salmon_seq_bias_5) > 0:
+                self.add_section( plot = linegraph.plot(self.salmon_seq_bias_5[i], pconfig_seq_bias_5) )
 
     def heatmap(self):
 
         names = []
+        missing_names = {}
         gc_exists = {}
         seq_exists = {}
         for f in self.find_log_files('salmon/fld'):
             if os.path.basename(f['root']) == 'libParams':
                 s_name = os.path.abspath(f['root'])
                 path = s_name[:-10]
+                sample_name = self.get_sample_name(s_name)
 
                 if 'no_bias' in s_name:
                     continue
@@ -265,18 +271,21 @@ class MultiqcModule(BaseMultiqcModule):
                 with open(path_meta_info, 'r') as info:
                     meta_info = json.load(info)
 
-                    if not meta_info['gc_bias_correct'] and not meta_info['seq_bias_correct']:
-                        continue
+                    gc_exists[sample_name] = meta_info['gc_bias_correct']
+                    seq_exists[sample_name] = meta_info['seq_bias_correct']
 
-                    gc_exists[self.get_sample_name(s_name)] = meta_info['gc_bias_correct']
-                    seq_exists[self.get_sample_name(s_name)] = meta_info['seq_bias_correct']
-
-                names.append(self.get_sample_name(s_name))
+                if gc_exists[sample_name] and seq_exists[sample_name]:
+                    names.append(sample_name)
+                    missing_names[sample_name] = {}
+                    missing_names[sample_name]['Missing Feature'] = 'No'
+                else:
+                    missing_names[sample_name] = {}
+                    missing_names[sample_name]['Missing Feature'] = 'Yes'
 
         # number_samples = len(self.matrix_gc)
         sims = [[0 for j in range(len(names))] for i in range(len(names))]
-        for i in range(len(names)) :
-            for j in range(len(names)) :
+        for i in range(len(names)):
+            for j in range(len(names)):
                 feature_count = 0
                 if gc_exists[names[i]] and gc_exists[names[j]]:
                     sims[i][j] += self.jensen_shannon_divergence(self.matrix_gc[names[i]], self.matrix_gc[names[j]])
@@ -286,19 +295,19 @@ class MultiqcModule(BaseMultiqcModule):
                         sims[i][j] += self.jensen_shannon_divergence(self.matrix_seq3[k][names[i]], self.matrix_seq3[k][names[j]])
                         sims[i][j] += self.jensen_shannon_divergence(self.matrix_seq5[k][names[i]], self.matrix_seq5[k][names[j]])
                         feature_count += 2.0
-                        
-                if feature_count == 0.0:
-                    sims[i][j] = 1.0
-                else:
-                    sims[i][j] /= feature_count
+
+                sims[i][j] /= feature_count
 
         pconfig_sim = {
-            'title': 'Jensen Shannon Divergence similarity',
+            'title': 'Sample similarity (JSD)',
             'xTitle': 'Samples',
             'yTitle': 'Samples',
         }
 
-        self.add_section(plot = heatmap.plot(sims, names, pconfig=pconfig_sim))
+        if len(names) > 0:
+            self.add_section(plot = heatmap.plot(sims, names, pconfig=pconfig_sim))
+
+        self.add_section(plot = table.plot(missing_names))
 
     def jensen_shannon_divergence(self, P, Q):
         """Compute the Jensen-Shannon divergence between two probability distributions.
