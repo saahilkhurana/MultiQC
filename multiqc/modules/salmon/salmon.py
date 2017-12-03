@@ -31,8 +31,8 @@ class MultiqcModule(BaseMultiqcModule):
         self.nucleotides = ['A', 'C', 'G', 'T']
         self.salmon_meta = dict()
         self.salmon_gcbias = dict()
-        self.salmon_seq_bias_3 = [dict() for i in range(4)]
-        self.salmon_seq_bias_5 = [dict() for i in range(4)]
+        self.salmon_seq_bias_3 = [dict() for i in range(len(self.nucleotides))]
+        self.salmon_seq_bias_5 = [dict() for i in range(len(self.nucleotides))]
         self.matrix_gc = {}
         self.matrix_seq3 = [{} for i in range(len(self.nucleotides))]
         self.matrix_seq5 = [{} for i in range(len(self.nucleotides))]
@@ -46,16 +46,19 @@ class MultiqcModule(BaseMultiqcModule):
         if len(self.salmon_fld) > 0:
             logger.info("Found {} fragment length distributions".format(len(self.salmon_fld)))
 
+        # Generates GC Bias linegraph plot
         self.gc_bias()
         if len(self.salmon_gcbias) > 0:
             logger.info("Found {} GC Bias distributions".format(len(self.salmon_gcbias)))
 
+        # Generates 8 Sequence Bias linegraph plots (4 for 3', 4 for 5')
         self.seq_bias()
         if len(self.salmon_seq_bias_3) > 0:
             logger.info("Found {} Sequence 3' Bias distributions".format(len(self.salmon_seq_bias_3[0])))
         if len(self.salmon_seq_bias_5) > 0:
             logger.info("Found {} Sequence 5' Bias distributions".format(len(self.salmon_seq_bias_5[0])))
 
+        # Generates Heatmap for samples containing all features (9 -> 1 for GC Bias and 8 for Seq bias)
         self.heatmap()
 
         # Filter to strip out ignored sample names
@@ -125,7 +128,12 @@ class MultiqcModule(BaseMultiqcModule):
         self.add_section(plot = linegraph.plot(self.salmon_fld, pconfig))
 
     def gc_bias(self):
-        # Parse GC Bias Distribution logs
+        """
+        Computes GC Bias
+        Input : Reads 3 lists corresponding to observed and 3 for expected
+        Calculates the weighted sum for obs, exp
+        Output : For proper X-Axis labels, scales the keys in ratio dict
+        """
 
         for f in self.find_log_files('salmon/fld'):
             if os.path.basename(f['root']) == 'libParams':
@@ -146,7 +154,7 @@ class MultiqcModule(BaseMultiqcModule):
 
                 obs = gcModel.obs_
                 obs_weights = gcModel.obs_weights_
-                # log.debug(obs_weights)
+
                 exp = gcModel.exp_
                 exp_weights = gcModel.exp_weights_
 
@@ -160,7 +168,7 @@ class MultiqcModule(BaseMultiqcModule):
                     ratio[i*scale_bin_factor] = float(obs_weighted[i]/exp_weighted[i])
 
                 s_name = os.path.abspath(f['root'])
-                # self.matrix_gc.append(list(ratio.values()))
+
                 self.matrix_gc[self.get_sample_name(s_name)] = list(ratio.values())
 
                 self.add_data_source(f, s_name)
@@ -180,8 +188,12 @@ class MultiqcModule(BaseMultiqcModule):
             self.add_section(plot = linegraph.plot(self.salmon_gcbias, pconfig_gcbias))
 
     def seq_bias(self):
-        # Parse Sequence bias Distribution logs
-
+        """
+        Computes Sequence Bias
+        Input : Reads 4 lists (one for each nucleotide) for each of obs 3', obs5', exp3', exp5'
+        Calculates the ratio of obs, exp for each nucleotide
+        Output : Plots 8 linegraphs - 3' and 5' for each nucleotide
+        """
         for f in self.find_log_files('salmon/fld'):
             if os.path.basename(f['root']) == 'libParams':
                 path = os.path.abspath(f['root'])
@@ -204,9 +216,8 @@ class MultiqcModule(BaseMultiqcModule):
                 exp3 = seqModel.exp3_seqMat
                 exp5 = seqModel.exp5_seqMat
 
-                ratio3 = [OrderedDict() for i in range(4)]
-                # ratio33 = [OrderedDict() for i in range(4)]
-                ratio5 = [OrderedDict() for i in range(4)]
+                ratio3 = [OrderedDict() for i in range(len(self.nucleotides))]
+                ratio5 = [OrderedDict() for i in range(len(self.nucleotides))]
 
                 s_name = os.path.abspath(f['root'])
                 sample_name = self.get_sample_name(s_name)
@@ -254,7 +265,12 @@ class MultiqcModule(BaseMultiqcModule):
                 self.add_section( plot = linegraph.plot(self.salmon_seq_bias_5[i], pconfig_seq_bias_5) )
 
     def heatmap(self):
-
+        """
+        Generates Heatmap for samples considering all features
+        Computes the Jensen Shannon Divergence between all samples
+        Value 0 corresponds to similar samples and 1 to dissimilar samples
+        Output : Plots heatmap and table showing presence of missing features in samples
+        """
         names = []
         missing_names = {}
         gc_exists = {}
@@ -282,7 +298,6 @@ class MultiqcModule(BaseMultiqcModule):
                     missing_names[sample_name] = {}
                     missing_names[sample_name]['Missing Feature'] = 'Yes'
 
-        # number_samples = len(self.matrix_gc)
         sims = [[0 for j in range(len(names))] for i in range(len(names))]
         for i in range(len(names)):
             for j in range(len(names)):
@@ -311,9 +326,8 @@ class MultiqcModule(BaseMultiqcModule):
 
     def jensen_shannon_divergence(self, P, Q):
         """Compute the Jensen-Shannon divergence between two probability distributions.
-
-            P, Q : array-like
-            Probability distributions of equal length that sum to 1
+            0 being very similar samples
+            Reference : https://stackoverflow.com/questions/15880133/jensen-shannon-divergence
         """
         def _kldiv(A, B):
             return np.sum([v for v in A * np.log2(A/B) if not np.isnan(v)])
