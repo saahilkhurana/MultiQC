@@ -31,8 +31,10 @@ class MultiqcModule(BaseMultiqcModule):
         self.nucleotides = ['A', 'C', 'G', 'T']
         self.salmon_meta = dict()
         self.salmon_gcbias = dict()
+        self.salmon_gcbias_rows = [dict() for i in range(3)]
         self.salmon_seq_bias_3 = [dict() for i in range(len(self.nucleotides))]
         self.salmon_seq_bias_5 = [dict() for i in range(len(self.nucleotides))]
+        self.salmon_seq_avg_bias = dict()
         self.matrix_gc = {}
         self.matrix_seq3 = [{} for i in range(len(self.nucleotides))]
         self.matrix_seq5 = [{} for i in range(len(self.nucleotides))]
@@ -158,21 +160,49 @@ class MultiqcModule(BaseMultiqcModule):
                 exp = gcModel.exp_
                 exp_weights = gcModel.exp_weights_
 
+                scale_bin_factor = 100.0/(len(obs[0])*1.0)
+                s_name = os.path.abspath(f['root'])
+
+                for i in range(3):
+                    obs_weighted_row = obs[i]*obs_weights[i]
+                    exp_weighted_row = exp[i]*exp_weights[i]
+
+                    ratio = OrderedDict()
+                    for j in range(len(obs_weighted_row)):
+                        ratio[j*scale_bin_factor] = float(obs_weighted_row[j]/exp_weighted_row[j])
+
+                    self.salmon_gcbias_rows[i][self.get_sample_name(s_name)] = ratio
+
                 obs_weighted = obs[0]*obs_weights[0] + obs[1]*obs_weights[1] + obs[2]*obs_weights[2]
                 exp_weighted = exp[0]*exp_weights[0] + exp[1]*exp_weights[1] + exp[2]*exp_weights[2]
 
-                scale_bin_factor = 100.0/(len(obs[0])*1.0)
+                #scale_bin_factor = 100.0/(len(obs[0])*1.0)
 
                 ratio = OrderedDict()
                 for i in range(len(obs_weighted)):
                     ratio[i*scale_bin_factor] = float(obs_weighted[i]/exp_weighted[i])
 
-                s_name = os.path.abspath(f['root'])
+                #s_name = os.path.abspath(f['root'])
 
                 self.matrix_gc[self.get_sample_name(s_name)] = list(ratio.values())
+                self.salmon_gcbias[self.get_sample_name(s_name)] = ratio
 
                 self.add_data_source(f, s_name)
-                self.salmon_gcbias[self.get_sample_name(s_name)] = ratio
+
+        row_labels = ['Low', 'Medium', 'High']
+        for i in range(3):
+            pconfig_gcbias_row = {
+                'smooth_points': 500,
+                'id': 'salmon_plot',
+                'title': 'Salmon: GC Bias Distribution Row ' + row_labels[i],
+                'ylab': 'Ratio of Observed to Expected',
+                'xlab': 'Bins',
+                'ymin': 0,
+                'xmin': 0,
+                'tt_label': '<b>{point.x:,.0f} </b>: {point.y:,.3f}',
+            }
+            if len(self.salmon_gcbias_rows[i]) > 0:
+                self.add_section(plot = linegraph.plot(self.salmon_gcbias_rows[i], pconfig_gcbias_row))
 
         pconfig_gcbias = {
             'smooth_points': 500,
@@ -218,6 +248,7 @@ class MultiqcModule(BaseMultiqcModule):
 
                 ratio3 = [OrderedDict() for i in range(len(self.nucleotides))]
                 ratio5 = [OrderedDict() for i in range(len(self.nucleotides))]
+                avg = OrderedDict()
 
                 s_name = os.path.abspath(f['root'])
                 sample_name = self.get_sample_name(s_name)
@@ -226,13 +257,23 @@ class MultiqcModule(BaseMultiqcModule):
 
                     for j in range(len(obs3[i])):
                         ratio3[i][j-4] = float(obs3[i][j]*1.0)/(exp3[i][j]*1.0)
+                        if j-4 not in avg:
+                            avg[j-4] = 0.0
+                        avg[j-4] += ratio3[i][j-4]
                     for j in range(len(obs5[i])):
                         ratio5[i][j-4] = (obs5[i][j]*1.0)/(exp5[i][j]*1.0)
+                        avg[j-4] += ratio5[i][j-4]
+
 
                     self.salmon_seq_bias_3[i][sample_name] = ratio3[i]
                     self.matrix_seq3[i][sample_name] = (list(ratio3[i].values()))
                     self.salmon_seq_bias_5[i][sample_name] = ratio5[i]
                     self.matrix_seq5[i][sample_name] = (list(ratio5[i].values()))
+
+                for key in avg.keys():
+                    avg[key] /= 8.0
+
+                self.salmon_seq_avg_bias[sample_name] = avg
 
                 self.add_data_source(f, s_name)
 
@@ -264,6 +305,19 @@ class MultiqcModule(BaseMultiqcModule):
             if len(self.salmon_seq_bias_5) > 0:
                 self.add_section( plot = linegraph.plot(self.salmon_seq_bias_5[i], pconfig_seq_bias_5) )
 
+        pconfig_avg_seq_bias = {
+            'smooth_points': 500,
+            'id': 'salmon_plot',
+            'title': "Salmon: Sequence Average Bias Distribution ",
+            'ylab': 'Ratio of Observed to Expected',
+            'xlab': 'Context Length',
+            'ymin': 0,
+            'xmin': -4,
+            'tt_label': '<b>{point.x:,.0f} </b>: {point.y:,.3f}',
+        }
+        if len(self.salmon_seq_avg_bias) > 0:
+            self.add_section( plot = linegraph.plot(self.salmon_seq_avg_bias, pconfig_avg_seq_bias) )
+
     def heatmap(self):
         """
         Generates Heatmap for samples considering all features
@@ -272,6 +326,8 @@ class MultiqcModule(BaseMultiqcModule):
         Output : Plots heatmap and table showing presence of missing features in samples
         """
         names = []
+        gc_names = []
+        seq_names = []
         missing_names = {}
         gc_exists = {}
         seq_exists = {}
@@ -290,15 +346,32 @@ class MultiqcModule(BaseMultiqcModule):
                     gc_exists[sample_name] = meta_info['gc_bias_correct']
                     seq_exists[sample_name] = meta_info['seq_bias_correct']
 
+                if gc_exists[sample_name]:
+                    gc_names.append(sample_name)
+                    if sample_name not in missing_names:
+                        missing_names[sample_name] = {}
+                    missing_names[sample_name]['Missing GC Feature'] = 'No'
+                else :
+                    if sample_name not in missing_names:
+                        missing_names[sample_name] = {}
+                    missing_names[sample_name]['Missing GC Feature'] = 'Yes'
+                if seq_exists[sample_name]:
+                    seq_names.append(sample_name)
+                    if sample_name not in missing_names:
+                        missing_names[sample_name] = {}
+                    missing_names[sample_name]['Missing Seq Feature'] = 'No'
+                else:
+                    if sample_name not in missing_names:
+                        missing_names[sample_name] = {}
+                    missing_names[sample_name]['Missing Seq Feature'] = 'Yes'
                 if gc_exists[sample_name] and seq_exists[sample_name]:
                     names.append(sample_name)
-                    missing_names[sample_name] = {}
-                    missing_names[sample_name]['Missing Feature'] = 'No'
-                else:
-                    missing_names[sample_name] = {}
-                    missing_names[sample_name]['Missing Feature'] = 'Yes'
 
+        sims_gc = [[0 for j in range(len(gc_names))] for i in range(len(gc_names))]
+        sims_3 = [[0 for j in range(len(seq_names))] for i in range(len(seq_names))]
+        sims_5 = [[0 for j in range(len(seq_names))] for i in range(len(seq_names))]
         sims = [[0 for j in range(len(names))] for i in range(len(names))]
+
         for i in range(len(names)):
             for j in range(len(names)):
                 feature_count = 0
@@ -312,13 +385,46 @@ class MultiqcModule(BaseMultiqcModule):
                         feature_count += 2.0
 
                 sims[i][j] /= feature_count
+        for i in range(len(gc_names)):
+            for j in range(len(gc_names)):
+                if gc_exists[gc_names[i]] and gc_exists[gc_names[j]]:
+                    sims_gc[i][j] += self.jensen_shannon_divergence(self.matrix_gc[gc_names[i]], self.matrix_gc[gc_names[j]])
 
+        for i in range(len(seq_names)):
+            for j in range(len(seq_names)):
+                for k in range(len(self.nucleotides)):
+                    if seq_exists[seq_names[i]] and seq_exists[seq_names[j]]:
+                        sims_3[i][j] += self.jensen_shannon_divergence(self.matrix_seq3[k][seq_names[i]], self.matrix_seq3[k][seq_names[j]])
+                        sims_5[i][j] += self.jensen_shannon_divergence(self.matrix_seq5[k][seq_names[i]], self.matrix_seq5[k][seq_names[j]])
+                sims_3[i][j] /= (1.0*len(self.nucleotides))
+                sims_5[i][j] /= (1.0*len(self.nucleotides))
         pconfig_sim = {
             'title': 'Sample similarity (JSD)',
             'xTitle': 'Samples',
             'yTitle': 'Samples',
         }
+        pconfig_sim_gc = {
+            'title': 'Feature GC Sample similarity (JSD)',
+            'xTitle': 'Samples',
+            'yTitle': 'Samples',
+        }
+        pconfig_sim_3 = {
+            'title': 'Feature Seq 3 Sample similarity (JSD)',
+            'xTitle': 'Samples',
+            'yTitle': 'Samples',
+        }
+        pconfig_sim_5 = {
+            'title': 'Feature Seq 5 Sample similarity (JSD)',
+            'xTitle': 'Samples',
+            'yTitle': 'Samples',
+        }
 
+        if len(gc_exists) > 0:
+            self.add_section(plot = heatmap.plot(sims_gc, gc_names, pconfig=pconfig_sim_gc))
+        if len(seq_exists) > 0:
+            self.add_section(plot = heatmap.plot(sims_3, seq_names, pconfig=pconfig_sim_3))
+        if len(seq_exists) > 0:
+            self.add_section(plot = heatmap.plot(sims_5, seq_names, pconfig=pconfig_sim_5))
         if len(names) > 0:
             self.add_section(plot = heatmap.plot(sims, names, pconfig=pconfig_sim))
 
