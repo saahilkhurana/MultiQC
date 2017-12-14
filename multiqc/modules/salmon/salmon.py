@@ -13,7 +13,7 @@ from numpy import zeros, array
 from multiqc import config
 from multiqc.plots import linegraph, heatmap, table
 from multiqc.modules.base_module import BaseMultiqcModule
-from multiqc.modules.salmon.readers import GCModel, SeqModel
+from multiqc.modules.salmon.readers import GCModel, SeqModel, QuantSFModel
 # Initialise the logger
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,7 @@ class MultiqcModule(BaseMultiqcModule):
         self.matrix_gc = {}
         self.matrix_seq3 = [{} for i in range(len(self.nucleotides))]
         self.matrix_seq5 = [{} for i in range(len(self.nucleotides))]
+        self.salmon_quant_sf = dict()
 
         self.general_stats()
         if len(self.salmon_meta) > 0:
@@ -62,6 +63,11 @@ class MultiqcModule(BaseMultiqcModule):
 
         # Generates Heatmap for samples containing all features (9 -> 1 for GC Bias and 8 for Seq bias)
         self.heatmap()
+
+        # Generates Quant.sf linegraph plot
+        self.quant_sf()
+        if len(self.salmon_quant_sf) > 0:
+            logger.info("Found {} quant.sf distributions".format(len(self.salmon_quant_sf)))
 
         # Filter to strip out ignored sample names
         self.salmon_meta = self.ignore_samples(self.salmon_meta)
@@ -444,3 +450,42 @@ class MultiqcModule(BaseMultiqcModule):
         M = 0.5 * (P + Q)
 
         return 0.5 * (_kldiv(P, M) +_kldiv(Q, M))
+
+    def quant_sf(self):
+        """
+        Computes GC Bias
+        Input : Reads 3 lists corresponding to observed and 3 for expected
+        Calculates the weighted sum for obs, exp
+        Output : For proper X-Axis labels, scales the keys in ratio dict
+        """
+
+        for f in self.find_log_files('salmon/fld'):
+            if os.path.basename(f['root']) == 'libParams':
+                path = os.path.abspath(f['root'])
+                path_mod = path[:-10]
+                s_name = path
+
+                quantSFModel = QuantSFModel()
+                quantSFModel.from_file(path_mod)
+
+                quantSF_ratio = quantSFModel.ratios
+
+                ratio = OrderedDict()
+                for i in range(len(quantSF_ratio)):
+                    ratio[i] = quantSF_ratio[i]
+
+                self.salmon_quant_sf[s_name] = ratio
+                self.add_data_source(f, s_name)
+
+        pconfig_quant = {
+            'smooth_points': 500,
+            'id': 'salmon_plot',
+            'title': 'Salmon: QuantSF Distribution',
+            'ylab': 'Ratio of Actual to Effective Transcript Length',
+            'xlab': 'Bins',
+            'ymin': 0,
+            'xmin': 0,
+            'tt_label': '<b>{point.x:,.0f} </b>: {point.y:,.3f}'
+        }
+        if len(self.salmon_quant_sf) > 0:
+            self.add_section(plot = linegraph.plot(self.salmon_quant_sf, pconfig_quant))
